@@ -69,7 +69,7 @@ async function createSpeech(
       audioUrls = [];
     let startTime = Date.now();
     while (requestStatus < 2) {
-      if (Date.now() - startTime > 30000) throw new Error("语音生成超时");
+      if (Date.now() - startTime > 60000) throw new Error("语音生成超时");
       const result = await core.request(
         "GET",
         `/v1/api/chat/msg_tts?msgID=${messageId}&timbre=${voice}`,
@@ -94,7 +94,7 @@ async function createSpeech(
         headers: {
           Referer: "https://hailuoai.com/",
         },
-        timeout: 30000,
+        timeout: 60000,
         responseType: "arraybuffer",
       })
     )
