@@ -42,8 +42,10 @@ class TokenManager {
                 this.tokens = [...config.tokens];
                 await this.saveTokens();
             } else {
-                logger.error(`Failed to load saved tokens: ${error.message}. Using default tokens.`);
-                this.tokens = [...config.tokens];
+                logger.error(`Failed to load saved tokens: ${error.message}. Using existing tokens or default tokens.`);
+                if (this.tokens.length === 0) {
+                    this.tokens = [...config.tokens];
+                }
             }
         }
         logger.info(`Total tokens after loading: ${this.tokens.length}`);
@@ -113,6 +115,19 @@ class TokenManager {
             logger.info(`New token added. Total tokens: ${this.tokens.length}`);
         } else {
             logger.warn(`Token already exists, not adding duplicate`);
+        }
+    }
+
+    async updateToken(oldToken: string, newToken: string) {
+        const index = this.tokens.indexOf(oldToken);
+        if (index !== -1) {
+            this.tokens[index] = newToken;
+            await this.saveTokens();
+            sessionManager.updateSessionTokens();
+            logger.info(`Token updated successfully`);
+        } else {
+            logger.warn(`Old token not found, adding new token instead`);
+            await this.addToken(newToken);
         }
     }
 
