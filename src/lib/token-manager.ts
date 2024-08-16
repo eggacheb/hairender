@@ -2,6 +2,7 @@ import fs from 'fs/promises';
 import config from './config.ts';
 import { refreshToken } from '../api/controllers/token-utils.ts';
 import logger from './logger.ts';
+import sessionManager from './session-manager.ts';
 
 interface RefreshStatus {
     timestamp: string;
@@ -11,7 +12,6 @@ interface RefreshStatus {
 
 class TokenManager {
     private tokens: string[] = [];
-    private lastRefreshTime: number = 0;
     private lastRefreshStatus: RefreshStatus | null = null;
 
     constructor() {
@@ -23,6 +23,7 @@ class TokenManager {
         try {
             const data = await fs.readFile(config.tokenSavePath, 'utf-8');
             this.tokens = JSON.parse(data);
+            logger.info("Tokens loaded successfully");
         } catch (error) {
             logger.warn("Failed to load saved tokens, using default tokens");
             this.tokens = [...config.tokens];
@@ -61,23 +62,21 @@ class TokenManager {
                     logger.info(`Token ${i + 1} refreshed successfully`);
                     successCount++;
                 } else {
-                    logger.warn(`Token ${i + 1} refresh returned no new token`);
+                    logger.warn(`Token ${i + 1} refresh failed, keeping old token`);
+                    newTokens.push(this.tokens[i]);
                     failCount++;
                 }
             } catch (error) {
                 logger.error(`Failed to refresh token ${i + 1}:`, error);
+                newTokens.push(this.tokens[i]);
                 failCount++;
             }
         }
 
-        if (newTokens.length > 0) {
-            this.tokens = newTokens;
-            await this.saveTokens();
-        } else {
-            logger.warn("All token refreshes failed. Keeping old tokens.");
-        }
+        this.tokens = newTokens;
+        await this.saveTokens();
+        sessionManager.updateSessionTokens();
 
-        this.lastRefreshTime = Date.now();
         this.lastRefreshStatus = {
             timestamp: new Date().toISOString(),
             successCount,
@@ -85,6 +84,29 @@ class TokenManager {
         };
 
         logger.info(`Token refresh completed. Success: ${successCount}, Failed: ${failCount}`);
+    }
+
+    async addToken(newToken: string) {
+        if (!this.tokens.includes(newToken)) {
+            this.tokens.push(newToken);
+            await this.saveTokens();
+            await this.loadTokens();
+            sessionManager.updateSessionTokens();
+            logger.info(`New token added and tokens reloaded`);
+        } else {
+            logger.warn(`Token already exists, not adding duplicate`);
+        }
+    }
+
+    getRandomToken(): string {
+        if (this.tokens.length === 0) {
+            throw new Error("No tokens available");
+        }
+        return this.tokens[Math.floor(Math.random() * this.tokens.length)];
+    }
+
+    getTokenCount(): number {
+        return this.tokens.length;
     }
 
     private scheduleRefresh() {
