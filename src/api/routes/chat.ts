@@ -4,7 +4,6 @@ import Response from '@/lib/response/Response.ts';
 import chat from '@/api/controllers/chat.ts';
 import logger from '@/lib/logger.ts';
 import config from '@/lib/config.ts';
-import tokenManager from '@/lib/token-manager.ts';
 import sessionManager from '@/lib/session-manager.ts';
 
 export default {
@@ -24,28 +23,20 @@ export default {
 
             const { model, conversation_id: convId, messages, stream } = request.body;
 
-            // 使用 conversation_id 作为 sessionId
+            // 使用 conversation_id 或创建一个新的
             let sessionId = convId || `temp_${Date.now()}`;
             let token = sessionManager.getToken(sessionId);
 
-            if (!token) {
-                // 如果session中没有token，则随机选择一个
-                const allTokens = tokenManager.getAllTokens().split(',');
-                token = allTokens[Math.floor(Math.random() * allTokens.length)];
-                sessionManager.setToken(sessionId, token);
-            }
-
-            // 如果convId不存在，使用新生成的sessionId
-            const finalConvId = convId || sessionId;
+            logger.info(`Chat completion request for session ${sessionId}`);
 
             if (stream) {
-                const stream = await chat.createCompletionStream(model, messages, token, finalConvId);
+                const stream = await chat.createCompletionStream(model, messages, token, sessionId);
                 return new Response(stream, {
                     type: "text/event-stream"
                 });
             }
             else
-                return await chat.createCompletion(model, messages, token, finalConvId);
+                return await chat.createCompletion(model, messages, token, sessionId);
         }
     }
 }
