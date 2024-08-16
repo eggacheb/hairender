@@ -20,7 +20,7 @@ class TokenManager {
 
     private async initialize() {
         await this.loadTokens();
-        await this.refreshTokens(); // 立即执行一次刷新
+        await this.checkAndRefreshTokens();
         this.scheduleRefresh();
     }
 
@@ -45,10 +45,21 @@ class TokenManager {
                 logger.error(`Failed to load saved tokens: ${error.message}. Using existing tokens or default tokens.`);
                 if (this.tokens.length === 0) {
                     this.tokens = [...config.tokens];
+                    await this.saveTokens();
                 }
             }
         }
         logger.info(`Total tokens after loading: ${this.tokens.length}`);
+    }
+
+    private async checkAndRefreshTokens() {
+        const now = Date.now();
+        const lastRefreshTime = this.lastRefreshStatus ? new Date(this.lastRefreshStatus.timestamp).getTime() : 0;
+        if (now - lastRefreshTime >= config.tokenRefreshInterval) {
+            await this.refreshTokens();
+        } else {
+            logger.info(`Skipping token refresh. Next refresh in ${Math.round((config.tokenRefreshInterval - (now - lastRefreshTime)) / 1000)} seconds.`);
+        }
     }
 
     private async saveTokens() {
