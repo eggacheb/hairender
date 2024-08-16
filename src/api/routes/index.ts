@@ -1,11 +1,11 @@
 import fs from 'fs-extra';
-
 import Response from '@/lib/response/Response.ts';
 import chat from "./chat.ts";
 import audio from './audio.ts';
 import ping from "./ping.ts";
 import token from './token.js';
 import models from './models.ts';
+import refreshStatus from './refresh-status.ts';
 
 export default [
     {
@@ -25,5 +25,6 @@ export default [
     audio,
     ping,
     token,
-    models
+    models,
+    refreshStatus
 ];
