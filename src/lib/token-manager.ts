@@ -15,27 +15,39 @@ class TokenManager {
     private lastRefreshStatus: RefreshStatus | null = null;
 
     constructor() {
-        this.loadTokens();
+        this.initialize();
+    }
+
+    private async initialize() {
+        await this.loadTokens();
+        await this.refreshTokens(); // 立即执行一次刷新
         this.scheduleRefresh();
     }
 
-    async loadTokens() {
+    private async loadTokens() {
         try {
             const data = await fs.readFile(config.tokenSavePath, 'utf-8');
             this.tokens = JSON.parse(data);
-            logger.info("Tokens loaded successfully");
+            if (this.tokens.length === 0) {
+                logger.warn('tokens.json is empty. Using default tokens.');
+                this.tokens = [...config.tokens];
+                await this.saveTokens();
+            }
+            logger.info(`Tokens loaded successfully. Total tokens: ${this.tokens.length}`);
         } catch (error) {
-            logger.warn("Failed to load saved tokens, using default tokens");
+            logger.warn(`Failed to load saved tokens: ${error.message}. Using default tokens.`);
             this.tokens = [...config.tokens];
+            await this.saveTokens();
+            logger.info(`Default tokens loaded and saved. Total tokens: ${this.tokens.length}`);
         }
     }
 
-    async saveTokens() {
+    private async saveTokens() {
         try {
-            await fs.writeFile(config.tokenSavePath, JSON.stringify(this.tokens));
-            logger.info("Tokens saved successfully");
+            await fs.writeFile(config.tokenSavePath, JSON.stringify(this.tokens, null, 2));
+            logger.info(`Tokens saved successfully. Total tokens: ${this.tokens.length}`);
         } catch (error) {
-            logger.error("Failed to save tokens:", error);
+            logger.error(`Failed to save tokens: ${error.message}`);
         }
     }
 
@@ -48,7 +60,7 @@ class TokenManager {
     }
 
     async refreshTokens() {
-        logger.info("Refreshing tokens...");
+        logger.info(`Starting token refresh. Total tokens to refresh: ${this.tokens.length}`);
         let successCount = 0;
         let failCount = 0;
 
@@ -67,7 +79,7 @@ class TokenManager {
                     failCount++;
                 }
             } catch (error) {
-                logger.error(`Failed to refresh token ${i + 1}:`, error);
+                logger.error(`Failed to refresh token ${i + 1}: ${error.message}`);
                 newTokens.push(this.tokens[i]);
                 failCount++;
             }
@@ -83,14 +95,13 @@ class TokenManager {
             failCount
         };
 
-        logger.info(`Token refresh completed. Success: ${successCount}, Failed: ${failCount}`);
+        logger.info(`Token refresh completed. Success: ${successCount}, Failed: ${failCount}, Total tokens: ${this.tokens.length}`);
     }
 
     async addToken(newToken: string) {
         if (!this.tokens.includes(newToken)) {
             this.tokens.push(newToken);
             await this.saveTokens();
-            await this.loadTokens();
             sessionManager.updateSessionTokens();
             logger.info(`New token added and tokens reloaded`);
         } else {
