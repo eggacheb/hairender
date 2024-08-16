@@ -1,9 +1,9 @@
 import https from 'https';
 import util from '@/lib/util.ts';
 
-export async function refreshToken(oldToken: string): Promise<string> {
-  const uuid = util.uuid(false);
-  const device_id = util.uuid(false);
+export async function refreshToken(oldToken: string): Promise<string | null> {
+  const uuid = generateUUID();
+  const device_id = generateDeviceID();
 
   const targetUrl = new URL('https://hailuoai.com/v1/api/user/renewal');
   targetUrl.searchParams.append('device_platform', 'web');
@@ -46,22 +46,32 @@ export async function refreshToken(oldToken: string): Promise<string> {
           resolve(responseJson.data.token);
         } catch (e) {
           console.log('Error parsing response:', e);
-          reject(e);
+          resolve(null);
         }
       });
     });
 
     req.on('error', (error) => {
       console.log('Error refreshing token:', error);
-      reject(error);
+      resolve(null);
     });
 
-    // 添加超时处理
     req.setTimeout(10000, () => {
       req.abort();
-      reject(new Error('Request timeout'));
+      resolve(null);
     });
 
     req.end();
   });
+}
+
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+function generateDeviceID() {
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 }
