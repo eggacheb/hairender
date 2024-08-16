@@ -8,7 +8,21 @@ import config from '@/lib/config.ts';
 import sessionManager from '@/lib/session-manager.ts';
 import logger from "@/lib/logger.ts";
 
-// ... (保持其他常量不变)
+const REPLACE_AUDIO_MODEL_ENV = (
+  environment.envVars["REPLACE_AUDIO_MODEL"] || ""
+)
+  .split(",")
+  .map((v) => v.trim());
+const VOICE_TO_MODEL_INDEX = Object.keys(modelMap["tts-1"]).reduce(
+  (obj, key, i) => {
+    obj[key] = i;
+    return obj;
+  },
+  {}
+);
+const REPLACE_AUDIO_MODEL = Object.values(modelMap["tts-1"]).map(
+  (v, i) => REPLACE_AUDIO_MODEL_ENV[i] || v
+);
 
 export default {
   prefix: "/v1/audio",
