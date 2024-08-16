@@ -110,7 +110,7 @@ class TokenManager {
             this.tokens.push(newToken);
             await this.saveTokens();
             sessionManager.updateSessionTokens();
-            logger.info(`New token added and tokens reloaded`);
+            logger.info(`New token added. Total tokens: ${this.tokens.length}`);
         } else {
             logger.warn(`Token already exists, not adding duplicate`);
         }
