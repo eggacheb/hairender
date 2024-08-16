@@ -1,5 +1,4 @@
 import _ from 'lodash';
-
 import APIException from '@/lib/exceptions/APIException.ts';
 import EX from '@/api/consts/exceptions.ts';
 import logger from '@/lib/logger.ts';
@@ -10,7 +9,6 @@ export interface RequestOptions {
 }
 
 export default class Request {
-
     /** 请求方法 */
     method: string;
     /** 请求URL */
@@ -36,8 +34,11 @@ export default class Request {
     /** 请求接受时间戳（毫秒） */
     time: number;
 
+    private ctx: any;
+
     constructor(ctx, options: RequestOptions = {}) {
         const { time } = options;
+        this.ctx = ctx;
         this.method = ctx.request.method;
         this.url = ctx.request.url;
         this.path = ctx.request.path;
@@ -69,4 +70,35 @@ export default class Request {
         return this;
     }
 
+    async json() {
+        if (!this.body || _.isEmpty(this.body)) {
+            const rawBody = await this.getRawBody();
+            try {
+                this.body = JSON.parse(rawBody);
+            } catch (e) {
+                logger.error(`Error parsing request body: ${e.message}`);
+                throw new APIException(EX.API_REQUEST_BODY_PARSE_ERROR, 'Invalid JSON in request body');
+            }
+        }
+        return this.body;
+    }
+
+    private getRawBody(): Promise<string> {
+        return new Promise((resolve, reject) => {
+            let data = '';
+            this.ctx.req.on('data', chunk => {
+                data += chunk;
+            });
+            this.ctx.req.on('end', () => {
+                resolve(data);
+            });
+            this.ctx.req.on('error', (err) => {
+                reject(err);
+            });
+        });
+    }
+
+    get(header: string): string | undefined {
+        return this.headers[header.toLowerCase()];
+    }
 }
