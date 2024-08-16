@@ -27,19 +27,26 @@ class TokenManager {
     private async loadTokens() {
         try {
             const data = await fs.readFile(config.tokenSavePath, 'utf-8');
-            this.tokens = JSON.parse(data);
-            if (this.tokens.length === 0) {
-                logger.warn('tokens.json is empty. Using default tokens.');
+            const loadedTokens = JSON.parse(data);
+            if (Array.isArray(loadedTokens) && loadedTokens.length > 0) {
+                this.tokens = loadedTokens;
+                logger.info(`Tokens loaded successfully from file. Total tokens: ${this.tokens.length}`);
+            } else {
+                logger.warn('tokens.json is empty or invalid. Using default tokens.');
                 this.tokens = [...config.tokens];
                 await this.saveTokens();
             }
-            logger.info(`Tokens loaded successfully. Total tokens: ${this.tokens.length}`);
         } catch (error) {
-            logger.warn(`Failed to load saved tokens: ${error.message}. Using default tokens.`);
-            this.tokens = [...config.tokens];
-            await this.saveTokens();
-            logger.info(`Default tokens loaded and saved. Total tokens: ${this.tokens.length}`);
+            if (error.code === 'ENOENT') {
+                logger.warn(`tokens.json not found. Creating new file with default tokens.`);
+                this.tokens = [...config.tokens];
+                await this.saveTokens();
+            } else {
+                logger.error(`Failed to load saved tokens: ${error.message}. Using default tokens.`);
+                this.tokens = [...config.tokens];
+            }
         }
+        logger.info(`Total tokens after loading: ${this.tokens.length}`);
     }
 
     private async saveTokens() {
@@ -106,19 +113,6 @@ class TokenManager {
             logger.info(`New token added and tokens reloaded`);
         } else {
             logger.warn(`Token already exists, not adding duplicate`);
-        }
-    }
-
-    async updateToken(oldToken: string, newToken: string) {
-        const index = this.tokens.indexOf(oldToken);
-        if (index !== -1) {
-            this.tokens[index] = newToken;
-            await this.saveTokens();
-            sessionManager.updateSessionTokens();
-            logger.info(`Token updated successfully`);
-        } else {
-            logger.warn(`Old token not found, adding new token instead`);
-            await this.addToken(newToken);
         }
     }
 
