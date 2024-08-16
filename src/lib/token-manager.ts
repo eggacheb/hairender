@@ -109,6 +109,19 @@ class TokenManager {
         }
     }
 
+    async updateToken(oldToken: string, newToken: string) {
+        const index = this.tokens.indexOf(oldToken);
+        if (index !== -1) {
+            this.tokens[index] = newToken;
+            await this.saveTokens();
+            sessionManager.updateSessionTokens();
+            logger.info(`Token updated successfully`);
+        } else {
+            logger.warn(`Old token not found, adding new token instead`);
+            await this.addToken(newToken);
+        }
+    }
+
     getRandomToken(): string {
         if (this.tokens.length === 0) {
             throw new Error("No tokens available");
