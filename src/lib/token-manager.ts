@@ -1,4 +1,5 @@
 import fs from 'fs/promises';
+import path from 'path';
 import config from './config.ts';
 import { refreshToken } from '../api/controllers/token-utils.ts';
 import logger from './logger.ts';
@@ -25,22 +26,39 @@ class TokenManager {
 
     private async loadTokens() {
         try {
+            await this.ensureTokenFileExists();
             const data = await fs.readFile(config.tokenSavePath, 'utf-8');
             this.tokens = JSON.parse(data);
             if (this.tokens.length === 0) {
-                throw new Error('tokens.json is empty');
+                logger.warn('tokens.json is empty. Using default tokens.');
+                this.tokens = [...config.tokens];
+                await this.saveTokens();
+            } else {
+                logger.info(`Tokens loaded successfully. Total tokens: ${this.tokens.length}`);
             }
-            logger.info(`Tokens loaded successfully. Total tokens: ${this.tokens.length}`);
         } catch (error) {
-            logger.warn(`Failed to load saved tokens or file is empty: ${error.message}. Using default tokens.`);
+            if (error instanceof SyntaxError) {
+                logger.error(`Invalid JSON in tokens.json. Using default tokens.`);
+            } else {
+                logger.error(`Failed to load saved tokens: ${error.message}. Using default tokens.`);
+            }
             this.tokens = [...config.tokens];
             await this.saveTokens();
-            logger.info(`Default tokens loaded and saved. Total tokens: ${this.tokens.length}`);
+        }
+    }
+
+    private async ensureTokenFileExists() {
+        try {
+            await fs.access(config.tokenSavePath);
+        } catch (error) {
+            logger.warn(`tokens.json does not exist. Creating it with default tokens.`);
+            await this.saveTokens();
         }
     }
 
     private async saveTokens() {
         try {
+            await fs.mkdir(path.dirname(config.tokenSavePath), { recursive: true });
             await fs.writeFile(config.tokenSavePath, JSON.stringify(this.tokens, null, 2));
             logger.info(`Tokens saved successfully. Total tokens: ${this.tokens.length}`);
         } catch (error) {
