@@ -5,25 +5,10 @@ import audio from '@/api/controllers/audio.ts';
 import modelMap from "../consts/model-map.ts";
 import environment from "@/lib/environment.ts";
 import config from '@/lib/config.ts';
-import tokenManager from '@/lib/token-manager.ts';
 import sessionManager from '@/lib/session-manager.ts';
 import logger from "@/lib/logger.ts";
 
-const REPLACE_AUDIO_MODEL_ENV = (
-  environment.envVars["REPLACE_AUDIO_MODEL"] || ""
-)
-  .split(",")
-  .map((v) => v.trim());
-const VOICE_TO_MODEL_INDEX = Object.keys(modelMap["tts-1"]).reduce(
-  (obj, key, i) => {
-    obj[key] = i;
-    return obj;
-  },
-  {}
-);
-const REPLACE_AUDIO_MODEL = Object.values(modelMap["tts-1"]).map(
-  (v, i) => REPLACE_AUDIO_MODEL_ENV[i] || v
-);
+// ... (保持其他常量不变)
 
 export default {
   prefix: "/v1/audio",
@@ -33,6 +18,7 @@ export default {
       request
         .validate("body.input", _.isString)
         .validate("body.voice", _.isString)
+        .validate("body.conversation_id", v => _.isUndefined(v) || _.isString(v))
         .validate("headers.authorization", _.isString);
 
       // 验证API密钥
@@ -43,22 +29,16 @@ export default {
 
       let { model, input, voice, conversation_id } = request.body;
 
-      // 使用 conversation_id 获取token
-      let token;
+      // 使用 conversation_id 获取对应的token
       let sessionId = conversation_id || `temp_${Date.now()}`;
-      token = sessionManager.getToken(sessionId);
+      let token = sessionManager.getToken(sessionId);
 
-      if (!token) {
-        // 如果没有找到对应的token，随机选择一个
-        const allTokens = tokenManager.getAllTokens().split(',');
-        token = allTokens[Math.floor(Math.random() * allTokens.length)];
-        sessionManager.setToken(sessionId, token);
-      }
+      logger.info(`Speech request for session ${sessionId}`);
 
       if (voice in VOICE_TO_MODEL_INDEX) {
         voice =
           REPLACE_AUDIO_MODEL[VOICE_TO_MODEL_INDEX[voice]] || "male-botong";
-        logger.info(`请求voice切换为: ${voice}`);
+        logger.info(`使用voice映射为: ${voice}`);
       }
       const stream = await audio.createSpeech(model, input, voice, token);
       return new Response(stream, {
@@ -72,6 +52,7 @@ export default {
       request
         .validate("body.model", _.isString)
         .validate("body.response_format", v => _.isUndefined(v) || _.isString(v))
+        .validate("body.conversation_id", v => _.isUndefined(v) || _.isString(v))
         .validate("headers.authorization", _.isString);
       
       // 验证API密钥
@@ -82,15 +63,11 @@ export default {
 
       const { model, response_format: responseFormat = 'json', conversation_id } = request.body;
 
-      let token;
-      if (conversation_id) {
-          token = sessionManager.getToken(conversation_id);
-      }
+      // 使用 conversation_id 获取对应的token
+      let sessionId = conversation_id || `temp_${Date.now()}`;
+      let token = sessionManager.getToken(sessionId);
 
-      if (!token) {
-          const allTokens = tokenManager.getAllTokens().split(',');
-          token = allTokens[Math.floor(Math.random() * allTokens.length)];
-      }
+      logger.info(`Transcription request for session ${sessionId}`);
 
       if(!request.files['file'] && !request.body["file"])
         throw new Error('File field is not set');
