@@ -25,7 +25,7 @@ export default {
 
             // 使用 conversation_id 或创建一个新的
             let sessionId = convId || `temp_${Date.now()}`;
-            let token = sessionManager.getToken(sessionId);
+            let token = await sessionManager.getToken(sessionId);
 
             logger.info(`Chat completion request for session ${sessionId}`);
 
