@@ -10,20 +10,25 @@ class Config {
     system = systemConfig;
 
     /** API密钥 */
-    apiKey = "sk-hailuofreeapi";
-
-    /** 内置token列表 */
-    tokens = [
-        "your_token_1",
-        "your_token_2",
-        "your_token_3"
-    ];
+    apiKey = process.env.API_KEY || "sk-hailuofreeapi";
 
     /** token刷新间隔（毫秒） */
-    tokenRefreshInterval = 7 * 24 * 60 * 60 * 1000; // 一周
+    tokenRefreshInterval = parseInt(process.env.TOKEN_REFRESH_INTERVAL || '604800000');
 
-    /** token保存路径 */
-    tokenSavePath = "./data/tokens.json";
+    /** Redis配置 */
+    redis = {
+        url: process.env.UPSTASH_REDIS_REST_URL,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN
+    };
+
+    constructor() {
+        if (!this.apiKey) {
+            console.warn("Warning: API_KEY is not set in environment variables. Using default value.");
+        }
+        if (!this.redis.url || !this.redis.token) {
+            console.error("Error: UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN is not set in environment variables.");
+        }
+    }
 }
 
 export default new Config();
