@@ -1,5 +1,5 @@
-import tokenManager from './token-manager.ts';
-import logger from '@/lib/logger.ts';
+import tokenManager from './token-manager';
+import logger from './logger';
 
 interface SessionData {
     token: string;
@@ -16,11 +16,12 @@ class SessionManager {
         this.updateTokens();
     }
 
-    updateTokens() {
-        this.tokens = tokenManager.getAllTokens().split(',');
+    async updateTokens() {
+        const allTokens = await tokenManager.getAllTokens();
+        this.tokens = allTokens.split(',');
     }
 
-    getToken(sessionId: string): string {
+    async getToken(sessionId: string): Promise<string> {
         let session = this.sessions.get(sessionId);
         if (session) {
             session.lastAccess = Date.now();
@@ -29,14 +30,14 @@ class SessionManager {
             return session.token;
         }
         // 如果session不存在，创建一个新的
-        const newToken = this.getNextToken();
+        const newToken = await this.getNextToken();
         this.sessions.set(sessionId, { token: newToken, lastAccess: Date.now() });
         const tokenIndex = this.tokens.indexOf(newToken);
         logger.info(`Created new session ${sessionId} with token: ${this.maskToken(newToken)} (Token ${tokenIndex + 1}/${this.tokens.length})`);
         return newToken;
     }
 
-    private getNextToken(): string {
+    private async getNextToken(): Promise<string> {
         if (this.tokens.length === 0) {
             throw new Error("No tokens available");
         }
@@ -55,10 +56,10 @@ class SessionManager {
         }
     }
 
-    updateSessionTokens() {
-        this.updateTokens();
+    async updateSessionTokens() {
+        await this.updateTokens();
         for (const [sessionId, session] of this.sessions.entries()) {
-            session.token = this.getNextToken();
+            session.token = await this.getNextToken();
             const tokenIndex = this.tokens.indexOf(session.token);
             logger.info(`Updated token for session ${sessionId}: ${this.maskToken(session.token)} (Token ${tokenIndex + 1}/${this.tokens.length})`);
         }
