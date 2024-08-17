@@ -15,6 +15,8 @@ class TokenManager {
   private lastRefreshStatus: RefreshStatus | null = null;
   private refreshInterval: NodeJS.Timeout | null = null;
   private lastRefreshTime: number = Date.now();
+  private cachedTokens: string[] = [];
+  private currentTokenIndex: number = 0;
 
   constructor() {
     logger.info('TokenManager: Initializing...');
@@ -30,11 +32,11 @@ class TokenManager {
 
   private async loadTokens(): Promise<void> {
     try {
-      const tokens = await redis.smembers(TOKENS_KEY);
-      if (tokens.length === 0) {
+      this.cachedTokens = await redis.smembers(TOKENS_KEY);
+      if (this.cachedTokens.length === 0) {
         throw new Error('No tokens found in Redis');
       }
-      logger.info(`TokenManager: Tokens loaded successfully. Total tokens: ${tokens.length}`);
+      logger.info(`TokenManager: Tokens loaded successfully. Total tokens: ${this.cachedTokens.length}`);
     } catch (error) {
       logger.error(`TokenManager: Failed to load tokens from Redis: ${error.message}`);
     }
@@ -46,6 +48,7 @@ class TokenManager {
       if (tokens.length > 0) {
         await redis.sadd(TOKENS_KEY, ...tokens);
       }
+      this.cachedTokens = tokens;
       logger.info(`TokenManager: Tokens saved successfully. Total tokens: ${tokens.length}`);
       return true;
     } catch (error) {
@@ -54,9 +57,8 @@ class TokenManager {
     }
   }
 
-  async getAllTokens(): Promise<string> {
-    const tokens = await redis.smembers(TOKENS_KEY);
-    return tokens.join(',');
+  getAllTokens(): string {
+    return this.cachedTokens.join(',');
   }
 
   getRefreshStatus(): RefreshStatus | null {
@@ -68,33 +70,32 @@ class TokenManager {
   }
 
   async refreshTokens() {
-    const tokens = await redis.smembers(TOKENS_KEY);
-    if (tokens.length === 0) {
+    if (this.cachedTokens.length === 0) {
       logger.warn('TokenManager: No tokens available for refresh');
       return;
     }
 
-    logger.info(`TokenManager: Starting token refresh. Total tokens to refresh: ${tokens.length}`);
+    logger.info(`TokenManager: Starting token refresh. Total tokens to refresh: ${this.cachedTokens.length}`);
     let successCount = 0;
     let failCount = 0;
 
     const newTokens = [];
 
-    for (let i = 0; i < tokens.length; i++) {
+    for (let i = 0; i < this.cachedTokens.length; i++) {
       try {
-        const newToken = await refreshToken(tokens[i]);
+        const newToken = await refreshToken(this.cachedTokens[i]);
         if (newToken) {
           newTokens.push(newToken);
           logger.info(`TokenManager: Token ${i + 1} refreshed successfully`);
           successCount++;
         } else {
           logger.warn(`TokenManager: Token ${i + 1} refresh failed, keeping old token`);
-          newTokens.push(tokens[i]);
+          newTokens.push(this.cachedTokens[i]);
           failCount++;
         }
       } catch (error) {
         logger.error(`TokenManager: Failed to refresh token ${i + 1}: ${error.message}`);
-        newTokens.push(tokens[i]);
+        newTokens.push(this.cachedTokens[i]);
         failCount++;
       }
     }
@@ -115,9 +116,9 @@ class TokenManager {
   }
 
   async addToken(newToken: string) {
-    const exists = await redis.sismember(TOKENS_KEY, newToken);
-    if (!exists) {
-      await redis.sadd(TOKENS_KEY, newToken);
+    if (!this.cachedTokens.includes(newToken)) {
+      this.cachedTokens.push(newToken);
+      await this.saveTokens(this.cachedTokens);
       await sessionManager.updateSessionTokens();
       logger.info(`New token added and tokens reloaded`);
     } else {
@@ -126,10 +127,10 @@ class TokenManager {
   }
 
   async updateToken(oldToken: string, newToken: string) {
-    const exists = await redis.sismember(TOKENS_KEY, oldToken);
-    if (exists) {
-      await redis.srem(TOKENS_KEY, oldToken);
-      await redis.sadd(TOKENS_KEY, newToken);
+    const index = this.cachedTokens.indexOf(oldToken);
+    if (index !== -1) {
+      this.cachedTokens[index] = newToken;
+      await this.saveTokens(this.cachedTokens);
       await sessionManager.updateSessionTokens();
       logger.info(`Token updated successfully`);
     } else {
@@ -138,16 +139,18 @@ class TokenManager {
     }
   }
 
-  async getRandomToken(): Promise<string> {
-    const tokens = await redis.smembers(TOKENS_KEY);
-    if (tokens.length === 0) {
+  getNextToken(): { token: string; index: number } {
+    if (this.cachedTokens.length === 0) {
       throw new Error("No tokens available");
     }
-    return tokens[Math.floor(Math.random() * tokens.length)];
+    const token = this.cachedTokens[this.currentTokenIndex];
+    const index = this.currentTokenIndex;
+    this.currentTokenIndex = (this.currentTokenIndex + 1) % this.cachedTokens.length;
+    return { token, index };
   }
 
-  async getTokenCount(): Promise<number> {
-    return await redis.scard(TOKENS_KEY);
+  getTokenCount(): number {
+    return this.cachedTokens.length;
   }
 
   private scheduleRefresh() {
