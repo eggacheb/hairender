@@ -1,4 +1,4 @@
-import fs from 'fs/promises';
+import fs from 'fs';
 import path from 'path';
 import config from './config.ts';
 import { refreshToken } from '../api/controllers/token-utils.ts';
@@ -14,55 +14,48 @@ interface RefreshStatus {
 class TokenManager {
     private tokens: string[] = [];
     private lastRefreshStatus: RefreshStatus | null = null;
+    private refreshInterval: NodeJS.Timeout | null = null;
 
     constructor() {
+        logger.info('TokenManager: Initializing...');
         this.initialize();
     }
 
-    private async initialize() {
-        await this.loadTokens();
-        this.scheduleRefresh();
+    private initialize() {
+        logger.info('TokenManager: Starting initialization...');
+        if (this.loadTokens()) {
+            logger.info('TokenManager: Tokens loaded successfully, scheduling refresh...');
+            this.scheduleRefresh();
+        } else {
+            logger.error('TokenManager: Failed to initialize due to token loading failure');
+        }
+        logger.info('TokenManager: Initialization completed');
     }
 
-    private async loadTokens() {
+    private loadTokens(): boolean {
         try {
-            await this.ensureTokenFileExists();
-            const data = await fs.readFile(config.tokenSavePath, 'utf-8');
+            logger.info(`TokenManager: Attempting to load tokens from ${config.tokenSavePath}`);
+            const data = fs.readFileSync(config.tokenSavePath, 'utf-8');
             this.tokens = JSON.parse(data);
             if (this.tokens.length === 0) {
-                logger.warn('tokens.json is empty. Using default tokens.');
-                this.tokens = [...config.tokens];
-                await this.saveTokens();
-            } else {
-                logger.info(`Tokens loaded successfully. Total tokens: ${this.tokens.length}`);
+                throw new Error('tokens.json is empty');
             }
+            logger.info(`TokenManager: Tokens loaded successfully. Total tokens: ${this.tokens.length}`);
+            return true;
         } catch (error) {
-            if (error instanceof SyntaxError) {
-                logger.error(`Invalid JSON in tokens.json. Using default tokens.`);
-            } else {
-                logger.error(`Failed to load saved tokens: ${error.message}. Using default tokens.`);
-            }
-            this.tokens = [...config.tokens];
-            await this.saveTokens();
+            logger.error(`TokenManager: Failed to load tokens from ${config.tokenSavePath}: ${error.message}`);
+            return false;
         }
     }
 
-    private async ensureTokenFileExists() {
+    private saveTokens(): boolean {
         try {
-            await fs.access(config.tokenSavePath);
+            fs.writeFileSync(config.tokenSavePath, JSON.stringify(this.tokens, null, 2));
+            logger.info(`TokenManager: Tokens saved successfully. Total tokens: ${this.tokens.length}`);
+            return true;
         } catch (error) {
-            logger.warn(`tokens.json does not exist. Creating it with default tokens.`);
-            await this.saveTokens();
-        }
-    }
-
-    private async saveTokens() {
-        try {
-            await fs.mkdir(path.dirname(config.tokenSavePath), { recursive: true });
-            await fs.writeFile(config.tokenSavePath, JSON.stringify(this.tokens, null, 2));
-            logger.info(`Tokens saved successfully. Total tokens: ${this.tokens.length}`);
-        } catch (error) {
-            logger.error(`Failed to save tokens: ${error.message}`);
+            logger.error(`TokenManager: Failed to save tokens: ${error.message}`);
+            return false;
         }
     }
 
@@ -75,7 +68,12 @@ class TokenManager {
     }
 
     async refreshTokens() {
-        logger.info(`Starting token refresh. Total tokens to refresh: ${this.tokens.length}`);
+        if (this.tokens.length === 0) {
+            logger.warn('TokenManager: No tokens available for refresh');
+            return;
+        }
+
+        logger.info(`TokenManager: Starting token refresh. Total tokens to refresh: ${this.tokens.length}`);
         let successCount = 0;
         let failCount = 0;
 
@@ -86,23 +84,24 @@ class TokenManager {
                 const newToken = await refreshToken(this.tokens[i]);
                 if (newToken) {
                     newTokens.push(newToken);
-                    logger.info(`Token ${i + 1} refreshed successfully`);
+                    logger.info(`TokenManager: Token ${i + 1} refreshed successfully`);
                     successCount++;
                 } else {
-                    logger.warn(`Token ${i + 1} refresh failed, keeping old token`);
+                    logger.warn(`TokenManager: Token ${i + 1} refresh failed, keeping old token`);
                     newTokens.push(this.tokens[i]);
                     failCount++;
                 }
             } catch (error) {
-                logger.error(`Failed to refresh token ${i + 1}: ${error.message}`);
+                logger.error(`TokenManager: Failed to refresh token ${i + 1}: ${error.message}`);
                 newTokens.push(this.tokens[i]);
                 failCount++;
             }
         }
 
         this.tokens = newTokens;
-        await this.saveTokens();
-        sessionManager.updateSessionTokens();
+        if (this.saveTokens()) {
+            sessionManager.updateSessionTokens();
+        }
 
         this.lastRefreshStatus = {
             timestamp: new Date().toISOString(),
@@ -110,7 +109,7 @@ class TokenManager {
             failCount
         };
 
-        logger.info(`Token refresh completed. Success: ${successCount}, Failed: ${failCount}, Total tokens: ${this.tokens.length}`);
+        logger.info(`TokenManager: Token refresh completed. Success: ${successCount}, Failed: ${failCount}, Total tokens: ${this.tokens.length}`);
     }
 
     async addToken(newToken: string) {
@@ -121,6 +120,19 @@ class TokenManager {
             logger.info(`New token added and tokens reloaded`);
         } else {
             logger.warn(`Token already exists, not adding duplicate`);
+        }
+    }
+
+    async updateToken(oldToken: string, newToken: string) {
+        const index = this.tokens.indexOf(oldToken);
+        if (index !== -1) {
+            this.tokens[index] = newToken;
+            await this.saveTokens();
+            sessionManager.updateSessionTokens();
+            logger.info(`Token updated successfully`);
+        } else {
+            logger.warn(`Old token not found, adding new token instead`);
+            await this.addToken(newToken);
         }
     }
 
@@ -136,9 +148,14 @@ class TokenManager {
     }
 
     private scheduleRefresh() {
-        setInterval(() => {
+        if (this.refreshInterval) {
+            clearInterval(this.refreshInterval);
+        }
+        const intervalInSeconds = config.tokenRefreshInterval / 1000;
+        this.refreshInterval = setInterval(() => {
             this.refreshTokens();
         }, config.tokenRefreshInterval);
+        logger.info(`TokenManager: Token refresh scheduled every ${intervalInSeconds} seconds`);
     }
 }
 
