@@ -6,6 +6,7 @@ import modelMap from "../consts/model-map.ts";
 import environment from "@/lib/environment.ts";
 import config from '@/lib/config.ts';
 import sessionManager from '@/lib/session-manager.ts';
+import tokenManager from '@/lib/token-manager.ts';
 import logger from "@/lib/logger.ts";
 
 const REPLACE_AUDIO_MODEL_ENV = (
@@ -45,9 +46,9 @@ export default {
 
       // 使用 conversation_id 获取对应的token
       let sessionId = conversation_id || `temp_${Date.now()}`;
-      let token = await sessionManager.getToken(sessionId);
+      let { token, tokenIndex } = sessionManager.getToken(sessionId);
 
-      logger.info(`Speech request for session ${sessionId}`);
+      logger.info(`Speech request for session ${sessionId} using token ${tokenIndex + 1}/${tokenManager.getTokenCount()}`);
 
       if (voice in VOICE_TO_MODEL_INDEX) {
         voice =
@@ -79,9 +80,9 @@ export default {
 
       // 使用 conversation_id 获取对应的token
       let sessionId = conversation_id || `temp_${Date.now()}`;
-      let token = await sessionManager.getToken(sessionId);
+      let { token, tokenIndex } = sessionManager.getToken(sessionId);
 
-      logger.info(`Transcription request for session ${sessionId}`);
+      logger.info(`Transcription request for session ${sessionId} using token ${tokenIndex + 1}/${tokenManager.getTokenCount()}`);
 
       if(!request.files['file'] && !request.body["file"])
         throw new Error('File field is not set');
