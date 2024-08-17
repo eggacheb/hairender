@@ -5,6 +5,7 @@ import chat from '@/api/controllers/chat.ts';
 import logger from '@/lib/logger.ts';
 import config from '@/lib/config.ts';
 import sessionManager from '@/lib/session-manager.ts';
+import tokenManager from '@/lib/token-manager.ts';
 
 export default {
     prefix: '/v1/chat',
@@ -25,9 +26,9 @@ export default {
 
             // 使用 conversation_id 或创建一个新的
             let sessionId = convId || `temp_${Date.now()}`;
-            let token = await sessionManager.getToken(sessionId);
+            let { token, tokenIndex } = sessionManager.getToken(sessionId);
 
-            logger.info(`Chat completion request for session ${sessionId}`);
+            logger.info(`Chat completion request for session ${sessionId} using token ${tokenIndex + 1}/${tokenManager.getTokenCount()}`);
 
             if (stream) {
                 const stream = await chat.createCompletionStream(model, messages, token, sessionId);
