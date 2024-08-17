@@ -3,47 +3,26 @@ import logger from './logger';
 
 interface SessionData {
     token: string;
+    tokenIndex: number;
     lastAccess: number;
 }
 
 class SessionManager {
     private sessions: Map<string, SessionData> = new Map();
-    private tokens: string[] = [];
-    private currentTokenIndex: number = 0;
     private readonly SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
 
-    constructor() {
-        this.updateTokens();
-    }
-
-    async updateTokens() {
-        const allTokens = await tokenManager.getAllTokens();
-        this.tokens = allTokens.split(',');
-    }
-
-    async getToken(sessionId: string): Promise<string> {
+    getToken(sessionId: string): { token: string; tokenIndex: number } {
         let session = this.sessions.get(sessionId);
         if (session) {
             session.lastAccess = Date.now();
-            const tokenIndex = this.tokens.indexOf(session.token);
-            logger.info(`Using existing token for session ${sessionId}: ${this.maskToken(session.token)} (Token ${tokenIndex + 1}/${this.tokens.length})`);
-            return session.token;
+            logger.info(`Using existing token for session ${sessionId}: ${this.maskToken(session.token)} (Token ${session.tokenIndex + 1}/${tokenManager.getTokenCount()})`);
+            return { token: session.token, tokenIndex: session.tokenIndex };
         }
         // 如果session不存在，创建一个新的
-        const newToken = await this.getNextToken();
-        this.sessions.set(sessionId, { token: newToken, lastAccess: Date.now() });
-        const tokenIndex = this.tokens.indexOf(newToken);
-        logger.info(`Created new session ${sessionId} with token: ${this.maskToken(newToken)} (Token ${tokenIndex + 1}/${this.tokens.length})`);
-        return newToken;
-    }
-
-    private async getNextToken(): Promise<string> {
-        if (this.tokens.length === 0) {
-            throw new Error("No tokens available");
-        }
-        const token = this.tokens[this.currentTokenIndex];
-        this.currentTokenIndex = (this.currentTokenIndex + 1) % this.tokens.length;
-        return token;
+        const { token, index } = tokenManager.getNextToken();
+        this.sessions.set(sessionId, { token, tokenIndex: index, lastAccess: Date.now() });
+        logger.info(`Created new session ${sessionId} with token: ${this.maskToken(token)} (Token ${index + 1}/${tokenManager.getTokenCount()})`);
+        return { token, tokenIndex: index };
     }
 
     cleanupSessions() {
@@ -56,12 +35,12 @@ class SessionManager {
         }
     }
 
-    async updateSessionTokens() {
-        await this.updateTokens();
+    updateSessionTokens() {
         for (const [sessionId, session] of this.sessions.entries()) {
-            session.token = await this.getNextToken();
-            const tokenIndex = this.tokens.indexOf(session.token);
-            logger.info(`Updated token for session ${sessionId}: ${this.maskToken(session.token)} (Token ${tokenIndex + 1}/${this.tokens.length})`);
+            const { token, index } = tokenManager.getNextToken();
+            session.token = token;
+            session.tokenIndex = index;
+            logger.info(`Updated token for session ${sessionId}: ${this.maskToken(token)} (Token ${index + 1}/${tokenManager.getTokenCount()})`);
         }
     }
 
