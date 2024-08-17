@@ -45,7 +45,7 @@ export default {
 
       // 使用 conversation_id 获取对应的token
       let sessionId = conversation_id || `temp_${Date.now()}`;
-      let token = sessionManager.getToken(sessionId);
+      let token = await sessionManager.getToken(sessionId);
 
       logger.info(`Speech request for session ${sessionId}`);
 
@@ -79,7 +79,7 @@ export default {
 
       // 使用 conversation_id 获取对应的token
       let sessionId = conversation_id || `temp_${Date.now()}`;
-      let token = sessionManager.getToken(sessionId);
+      let token = await sessionManager.getToken(sessionId);
 
       logger.info(`Transcription request for session ${sessionId}`);
 
