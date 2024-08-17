@@ -15,6 +15,7 @@ class TokenManager {
     private tokens: string[] = [];
     private lastRefreshStatus: RefreshStatus | null = null;
     private refreshInterval: NodeJS.Timeout | null = null;
+    private lastRefreshTime: number = Date.now();
 
     constructor() {
         logger.info('TokenManager: Initializing...');
@@ -67,6 +68,10 @@ class TokenManager {
         return this.lastRefreshStatus;
     }
 
+    getNextRefreshTime(): number {
+        return this.lastRefreshTime + config.tokenRefreshInterval;
+    }
+
     async refreshTokens() {
         if (this.tokens.length === 0) {
             logger.warn('TokenManager: No tokens available for refresh');
@@ -108,6 +113,8 @@ class TokenManager {
             successCount,
             failCount
         };
+
+        this.lastRefreshTime = Date.now();
 
         logger.info(`TokenManager: Token refresh completed. Success: ${successCount}, Failed: ${failCount}, Total tokens: ${this.tokens.length}`);
     }
