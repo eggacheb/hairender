@@ -6,6 +6,7 @@ import ping from "./ping.ts";
 import token from './token.js';
 import models from './models.ts';
 import refreshStatus from './refresh-status.ts';
+import tokenManager from '@/lib/token-manager.ts';
 
 export default [
     {
@@ -18,6 +19,10 @@ export default [
                         Expires: '-1'
                     }
                 });
+            },
+            '/next-refresh': async () => {
+                const nextRefresh = tokenManager.getNextRefreshTime();
+                return { nextRefresh };
             }
         }
     },
