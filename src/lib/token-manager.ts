@@ -1,169 +1,165 @@
-import fs from 'fs';
-import path from 'path';
-import config from './config.ts';
-import { refreshToken } from '../api/controllers/token-utils.ts';
-import logger from './logger.ts';
-import sessionManager from './session-manager.ts';
+import redis from './redis-client';
+import logger from './logger';
+import sessionManager from './session-manager';
+import { refreshToken } from '../api/controllers/token-utils';
+
+const TOKENS_KEY = 'hailuofree:tokens';
 
 interface RefreshStatus {
-    timestamp: string;
-    successCount: number;
-    failCount: number;
+  timestamp: string;
+  successCount: number;
+  failCount: number;
 }
 
 class TokenManager {
-    private tokens: string[] = [];
-    private lastRefreshStatus: RefreshStatus | null = null;
-    private refreshInterval: NodeJS.Timeout | null = null;
-    private lastRefreshTime: number = Date.now();
+  private lastRefreshStatus: RefreshStatus | null = null;
+  private refreshInterval: NodeJS.Timeout | null = null;
+  private lastRefreshTime: number = Date.now();
 
-    constructor() {
-        logger.info('TokenManager: Initializing...');
-        this.initialize();
+  constructor() {
+    logger.info('TokenManager: Initializing...');
+    this.initialize();
+  }
+
+  private async initialize() {
+    logger.info('TokenManager: Starting initialization...');
+    await this.loadTokens();
+    this.scheduleRefresh();
+    logger.info('TokenManager: Initialization completed');
+  }
+
+  private async loadTokens(): Promise<void> {
+    try {
+      const tokens = await redis.smembers(TOKENS_KEY);
+      if (tokens.length === 0) {
+        throw new Error('No tokens found in Redis');
+      }
+      logger.info(`TokenManager: Tokens loaded successfully. Total tokens: ${tokens.length}`);
+    } catch (error) {
+      logger.error(`TokenManager: Failed to load tokens from Redis: ${error.message}`);
+    }
+  }
+
+  private async saveTokens(tokens: string[]): Promise<boolean> {
+    try {
+      await redis.del(TOKENS_KEY);
+      if (tokens.length > 0) {
+        await redis.sadd(TOKENS_KEY, ...tokens);
+      }
+      logger.info(`TokenManager: Tokens saved successfully. Total tokens: ${tokens.length}`);
+      return true;
+    } catch (error) {
+      logger.error(`TokenManager: Failed to save tokens: ${error.message}`);
+      return false;
+    }
+  }
+
+  async getAllTokens(): Promise<string> {
+    const tokens = await redis.smembers(TOKENS_KEY);
+    return tokens.join(',');
+  }
+
+  getRefreshStatus(): RefreshStatus | null {
+    return this.lastRefreshStatus;
+  }
+
+  getNextRefreshTime(): number {
+    return this.lastRefreshTime + parseInt(process.env.TOKEN_REFRESH_INTERVAL || '604800000');
+  }
+
+  async refreshTokens() {
+    const tokens = await redis.smembers(TOKENS_KEY);
+    if (tokens.length === 0) {
+      logger.warn('TokenManager: No tokens available for refresh');
+      return;
     }
 
-    private initialize() {
-        logger.info('TokenManager: Starting initialization...');
-        if (this.loadTokens()) {
-            logger.info('TokenManager: Tokens loaded successfully, scheduling refresh...');
-            this.scheduleRefresh();
+    logger.info(`TokenManager: Starting token refresh. Total tokens to refresh: ${tokens.length}`);
+    let successCount = 0;
+    let failCount = 0;
+
+    const newTokens = [];
+
+    for (let i = 0; i < tokens.length; i++) {
+      try {
+        const newToken = await refreshToken(tokens[i]);
+        if (newToken) {
+          newTokens.push(newToken);
+          logger.info(`TokenManager: Token ${i + 1} refreshed successfully`);
+          successCount++;
         } else {
-            logger.error('TokenManager: Failed to initialize due to token loading failure');
+          logger.warn(`TokenManager: Token ${i + 1} refresh failed, keeping old token`);
+          newTokens.push(tokens[i]);
+          failCount++;
         }
-        logger.info('TokenManager: Initialization completed');
+      } catch (error) {
+        logger.error(`TokenManager: Failed to refresh token ${i + 1}: ${error.message}`);
+        newTokens.push(tokens[i]);
+        failCount++;
+      }
     }
 
-    private loadTokens(): boolean {
-        try {
-            logger.info(`TokenManager: Attempting to load tokens from ${config.tokenSavePath}`);
-            const data = fs.readFileSync(config.tokenSavePath, 'utf-8');
-            this.tokens = JSON.parse(data);
-            if (this.tokens.length === 0) {
-                throw new Error('tokens.json is empty');
-            }
-            logger.info(`TokenManager: Tokens loaded successfully. Total tokens: ${this.tokens.length}`);
-            return true;
-        } catch (error) {
-            logger.error(`TokenManager: Failed to load tokens from ${config.tokenSavePath}: ${error.message}`);
-            return false;
-        }
+    if (await this.saveTokens(newTokens)) {
+      await sessionManager.updateSessionTokens();
     }
 
-    private saveTokens(): boolean {
-        try {
-            fs.writeFileSync(config.tokenSavePath, JSON.stringify(this.tokens, null, 2));
-            logger.info(`TokenManager: Tokens saved successfully. Total tokens: ${this.tokens.length}`);
-            return true;
-        } catch (error) {
-            logger.error(`TokenManager: Failed to save tokens: ${error.message}`);
-            return false;
-        }
+    this.lastRefreshStatus = {
+      timestamp: new Date().toISOString(),
+      successCount,
+      failCount
+    };
+
+    this.lastRefreshTime = Date.now();
+
+    logger.info(`TokenManager: Token refresh completed. Success: ${successCount}, Failed: ${failCount}, Total tokens: ${newTokens.length}`);
+  }
+
+  async addToken(newToken: string) {
+    const exists = await redis.sismember(TOKENS_KEY, newToken);
+    if (!exists) {
+      await redis.sadd(TOKENS_KEY, newToken);
+      await sessionManager.updateSessionTokens();
+      logger.info(`New token added and tokens reloaded`);
+    } else {
+      logger.warn(`Token already exists, not adding duplicate`);
     }
+  }
 
-    getAllTokens(): string {
-        return this.tokens.join(',');
+  async updateToken(oldToken: string, newToken: string) {
+    const exists = await redis.sismember(TOKENS_KEY, oldToken);
+    if (exists) {
+      await redis.srem(TOKENS_KEY, oldToken);
+      await redis.sadd(TOKENS_KEY, newToken);
+      await sessionManager.updateSessionTokens();
+      logger.info(`Token updated successfully`);
+    } else {
+      logger.warn(`Old token not found, adding new token instead`);
+      await this.addToken(newToken);
     }
+  }
 
-    getRefreshStatus(): RefreshStatus | null {
-        return this.lastRefreshStatus;
+  async getRandomToken(): Promise<string> {
+    const tokens = await redis.smembers(TOKENS_KEY);
+    if (tokens.length === 0) {
+      throw new Error("No tokens available");
     }
+    return tokens[Math.floor(Math.random() * tokens.length)];
+  }
 
-    getNextRefreshTime(): number {
-        return this.lastRefreshTime + config.tokenRefreshInterval;
+  async getTokenCount(): Promise<number> {
+    return await redis.scard(TOKENS_KEY);
+  }
+
+  private scheduleRefresh() {
+    if (this.refreshInterval) {
+      clearInterval(this.refreshInterval);
     }
-
-    async refreshTokens() {
-        if (this.tokens.length === 0) {
-            logger.warn('TokenManager: No tokens available for refresh');
-            return;
-        }
-
-        logger.info(`TokenManager: Starting token refresh. Total tokens to refresh: ${this.tokens.length}`);
-        let successCount = 0;
-        let failCount = 0;
-
-        const newTokens = [];
-
-        for (let i = 0; i < this.tokens.length; i++) {
-            try {
-                const newToken = await refreshToken(this.tokens[i]);
-                if (newToken) {
-                    newTokens.push(newToken);
-                    logger.info(`TokenManager: Token ${i + 1} refreshed successfully`);
-                    successCount++;
-                } else {
-                    logger.warn(`TokenManager: Token ${i + 1} refresh failed, keeping old token`);
-                    newTokens.push(this.tokens[i]);
-                    failCount++;
-                }
-            } catch (error) {
-                logger.error(`TokenManager: Failed to refresh token ${i + 1}: ${error.message}`);
-                newTokens.push(this.tokens[i]);
-                failCount++;
-            }
-        }
-
-        this.tokens = newTokens;
-        if (this.saveTokens()) {
-            sessionManager.updateSessionTokens();
-        }
-
-        this.lastRefreshStatus = {
-            timestamp: new Date().toISOString(),
-            successCount,
-            failCount
-        };
-
-        this.lastRefreshTime = Date.now();
-
-        logger.info(`TokenManager: Token refresh completed. Success: ${successCount}, Failed: ${failCount}, Total tokens: ${this.tokens.length}`);
-    }
-
-    async addToken(newToken: string) {
-        if (!this.tokens.includes(newToken)) {
-            this.tokens.push(newToken);
-            await this.saveTokens();
-            sessionManager.updateSessionTokens();
-            logger.info(`New token added and tokens reloaded`);
-        } else {
-            logger.warn(`Token already exists, not adding duplicate`);
-        }
-    }
-
-    async updateToken(oldToken: string, newToken: string) {
-        const index = this.tokens.indexOf(oldToken);
-        if (index !== -1) {
-            this.tokens[index] = newToken;
-            await this.saveTokens();
-            sessionManager.updateSessionTokens();
-            logger.info(`Token updated successfully`);
-        } else {
-            logger.warn(`Old token not found, adding new token instead`);
-            await this.addToken(newToken);
-        }
-    }
-
-    getRandomToken(): string {
-        if (this.tokens.length === 0) {
-            throw new Error("No tokens available");
-        }
-        return this.tokens[Math.floor(Math.random() * this.tokens.length)];
-    }
-
-    getTokenCount(): number {
-        return this.tokens.length;
-    }
-
-    private scheduleRefresh() {
-        if (this.refreshInterval) {
-            clearInterval(this.refreshInterval);
-        }
-        const intervalInSeconds = config.tokenRefreshInterval / 1000;
-        this.refreshInterval = setInterval(() => {
-            this.refreshTokens();
-        }, config.tokenRefreshInterval);
-        logger.info(`TokenManager: Token refresh scheduled every ${intervalInSeconds} seconds`);
-    }
+    const intervalInSeconds = parseInt(process.env.TOKEN_REFRESH_INTERVAL || '604800000') / 1000;
+    this.refreshInterval = setInterval(() => {
+      this.refreshTokens();
+    }, intervalInSeconds * 1000);
+    logger.info(`TokenManager: Token refresh scheduled every ${intervalInSeconds} seconds`);
+  }
 }
 
 export default new TokenManager();
