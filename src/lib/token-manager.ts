@@ -1,7 +1,7 @@
-import redis from './redis-client';
-import logger from './logger';
-import sessionManager from './session-manager';
-import { refreshToken } from '../api/controllers/token-utils';
+import redis from './redis-client.ts';
+import logger from './logger.ts';
+import sessionManager from './session-manager.ts';
+import { refreshToken } from '../api/controllers/token-utils.ts';
 
 const TOKENS_KEY = 'hailuofree:tokens';
 
