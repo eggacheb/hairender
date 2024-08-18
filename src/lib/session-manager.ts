@@ -1,5 +1,5 @@
-import tokenManager from './token-manager';
-import logger from './logger';
+import tokenManager from './token-manager.ts';
+import logger from './logger.ts';
 
 interface SessionData {
     token: string;
